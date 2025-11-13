@@ -1,0 +1,52 @@
+# Few-Shot YOLOv5 Training Configuration
+
+# Model
+yolo_weights: 'yolov5m.pt'  # Pretrained YOLOv5 weights
+freeze_backbone: true        # Freeze backbone for transfer learning
+num_refs: 3                  # Number of reference images
+num_classes: 1               # Single class detection
+
+# Data
+train_data: 'data/train'
+val_data: 'data/val'
+img_size: 640
+num_workers: 4
+cache_images: false          # Cache images in RAM (requires lots of memory)
+
+# Training
+epochs: 100
+batch_size: 8
+accumulation_steps: 4        # Effective batch size = 8 * 4 = 32
+device: 'cuda'
+
+# Optimizer
+lr: 0.0001                   # Learning rate for custom modules
+lr_backbone: 0.00001         # Lower LR for pretrained backbone
+weight_decay: 0.0001
+grad_clip: 10.0
+
+# Scheduler
+scheduler: 'cosine'          # 'cosine', 'step', or 'plateau'
+lr_step: 10                  # For step scheduler
+lr_gamma: 0.1                # For step scheduler
+
+# Loss weights
+lambda_bbox: 5.0
+lambda_obj: 1.0
+lambda_cls: 0.5
+lambda_sim: 2.0
+lambda_attn: 0.1
+
+# Mixed precision
+use_amp: true                # Automatic Mixed Precision
+
+# Checkpointing
+save_dir: 'checkpoints/fewshot_yolo'
+save_interval: 10            # Save checkpoint every N epochs
+early_stopping_patience: 15
+
+# Logging
+log_interval: 10             # Log to TensorBoard every N steps
+
+# Augmentation
+augment: true
