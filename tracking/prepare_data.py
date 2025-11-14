@@ -28,7 +28,7 @@ def prepare_training_data(raw_data_dir: str, output_dir: str, split_ratio: float
         (output_path / split / 'annotations').mkdir(parents=True, exist_ok=True)
     
     # Load annotations
-    ann_file = raw_path / 'annotations.json'
+    ann_file = raw_path / 'annotations' / 'annotations.json'
     with open(ann_file, 'r', encoding='utf-8') as f:
         annotations = json.load(f)
     
