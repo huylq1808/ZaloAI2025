@@ -11,6 +11,7 @@ Output: [B, C, H, W] - Single prototype feature
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Tuple
 
 
 class ReferenceEncoder(nn.Module):
@@ -73,7 +74,7 @@ class ReferenceEncoder(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
     
-    def forward(self, ref_features: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, ref_features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass
         
