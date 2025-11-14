@@ -7,8 +7,8 @@ num_refs: 3                  # Number of reference images
 num_classes: 1               # Single class detection
 
 # Data
-train_data: 'data/train'
-val_data: 'data/val'
+train_data: '/kaggle/input/zaloai-traindataset/data/train'
+val_data: '/kaggle/input/zaloai-traindataset/data/val'
 img_size: 640
 num_workers: 4
 cache_images: false          # Cache images in RAM (requires lots of memory)
