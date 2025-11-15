@@ -1,12 +1,22 @@
+"""
+Few-Shot YOLOv5 Backbone Model
+
+Uses the yolov5 Python package for easy model loading.
+Install: pip install yolov5
+"""
+
 import torch
 import torch.nn as nn
 from typing import Tuple, Optional, Dict, List
 import sys
 from pathlib import Path
 
+
 class FewShotYOLOv5(nn.Module):
     """
     Few-Shot YOLOv5 Detection Model
+    
+    Uses YOLOv5 as backbone with few-shot learning capabilities.
     """
     
     def __init__(self,
@@ -42,85 +52,51 @@ class FewShotYOLOv5(nn.Module):
     
     def _load_backbone(self, weights_path: str, freeze: bool) -> Tuple[nn.Module, int]:
         """
-        Load YOLOv5 backbone with automatic download
+        Load YOLOv5 backbone using yolov5 package
         
         Returns:
-            backbone: YOLOv5 model
+            backbone: YOLOv5 model (feature extractor)
             feat_dim: Feature dimension
         """
         print(f"Loading YOLOv5 from: {weights_path}")
         
-        # Check if weights exist, if not download from torch hub
-        weights_file = Path(weights_path)
-        
-        if not weights_file.exists():
-            print(f"⚠️  Weights not found: {weights_path}")
-            print("📥 Downloading from torch.hub...")
+        try:
+            # Import yolov5 package
+            import yolov5
             
-            try:
-                # Download using torch hub
-                model_name = weights_file.stem  # e.g., 'yolov5m'
-                
-                # Load model from ultralytics hub
-                model = torch.hub.load(
-                    'ultralytics/yolov5',
-                    model_name,
-                    pretrained=True,
-                    trust_repo=True,
-                    verbose=False
-                )
-                
+            # Extract model name from path
+            weights_file = Path(weights_path)
+            model_name = weights_file.stem  # e.g., 'yolov5m'
+            
+            # Check if local weights exist
+            if weights_file.exists():
+                print(f"✓ Loading from local file: {weights_path}")
+                # Load custom/local weights
+                full_model = yolov5.load(str(weights_path))
+            else:
+                print(f"⚠️  Weights not found locally: {weights_path}")
+                print(f"📥 Downloading pretrained {model_name}...")
+                # Load pretrained model (auto-downloads)
+                full_model = yolov5.load(f'{model_name}.pt')
                 print(f"✓ Downloaded {model_name} successfully")
-                
-            except Exception as e:
-                print(f"❌ Failed to download from hub: {e}")
-                raise RuntimeError(f"Cannot load YOLOv5 weights: {e}")
-        else:
-            # Load from local file
-            try:
-                # Try loading with torch.load first
-                ckpt = torch.load(weights_path, map_location='cpu')
-                
-                # Extract model from checkpoint
-                if isinstance(ckpt, dict) and 'model' in ckpt:
-                    model = ckpt['model'].float()
-                else:
-                    # Might be direct model save
-                    model = ckpt
-                
-                print(f"✓ Loaded from local file: {weights_path}")
-                
-            except Exception as e1:
-                print(f"Error loading checkpoint: {e1}")
-                
-                # Fallback: load from hub
-                try:
-                    model_name = Path(weights_path).stem
-                    print(f"📥 Downloading {model_name} from torch.hub...")
-                    
-                    model = torch.hub.load(
-                        'ultralytics/yolov5',
-                        model_name,
-                        pretrained=True,
-                        trust_repo=True,
-                        verbose=False
-                    )
-                    
-                    print(f"✓ Downloaded {model_name} successfully")
-                    
-                except Exception as e2:
-                    raise RuntimeError(f"Failed to load YOLOv5: {e2}")
+            
+        except ImportError:
+            raise ImportError(
+                "yolov5 package not found. Install with: pip install yolov5"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to load YOLOv5 weights: {e}")
         
         # Extract backbone (feature extractor)
-        # YOLOv5 structure: model.model[:10] is backbone
         try:
-            if hasattr(model, 'model'):
-                backbone = model.model[:10]  # Feature extraction layers
+            # YOLOv5 model structure: model.model contains the layers
+            if hasattr(full_model, 'model'):
+                # Take layers 0-9 (backbone without detection head)
+                backbone = full_model.model[:10]
             else:
-                # If model is already the sequential
-                backbone = model[:10]
+                raise AttributeError("Unexpected YOLOv5 model structure")
             
-            # Get feature dimension from last layer
+            # Get feature dimension
             feat_dim = self._get_feature_dim(backbone)
             
             print(f"✓ Backbone extracted, feature dim: {feat_dim}")
@@ -141,6 +117,12 @@ class FewShotYOLOv5(nn.Module):
     def _get_feature_dim(self, backbone: nn.Module) -> int:
         """
         Get output feature dimension of backbone
+        
+        Args:
+            backbone: YOLOv5 backbone module
+            
+        Returns:
+            feat_dim: Feature dimension (number of channels)
         """
         # Test with dummy input
         dummy_input = torch.randn(1, 3, 640, 640)
@@ -165,6 +147,7 @@ class FewShotYOLOv5(nn.Module):
         Build detection head for few-shot detection
         
         Output format: [B, num_anchors * (5 + num_classes), H, W]
+        Where:
         - 5: x, y, w, h, objectness
         - num_classes: class probabilities (1 for single class)
         """
@@ -190,11 +173,11 @@ class FewShotYOLOv5(nn.Module):
         Encode reference images into prototype
         
         Args:
-            ref_images: [B, num_refs, 3, H, W]
+            ref_images: [B, num_refs, 3, H, W] - Reference images
             
         Returns:
-            ref_prototype: [B, C, H, W]
-            attention_weights: [B, num_refs]
+            ref_prototype: [B, C, H, W] - Aggregated prototype
+            attention_weights: [B, num_refs] - Attention weights per reference
         """
         B, num_refs, C, H, W = ref_images.shape
         
@@ -213,7 +196,7 @@ class FewShotYOLOv5(nn.Module):
         _, C_feat, H_feat, W_feat = ref_features.shape
         ref_features = ref_features.view(B, num_refs, C_feat, H_feat, W_feat)
         
-        # Encode into prototype
+        # Encode into prototype using attention
         ref_prototype, attention_weights = self.reference_encoder(ref_features)
         
         return ref_prototype, attention_weights
@@ -227,16 +210,16 @@ class FewShotYOLOv5(nn.Module):
         Forward pass
         
         Args:
-            query_images: [B, 3, H, W] - Query images to detect
+            query_images: [B, 3, H, W] - Query images to detect objects in
             ref_images: [B, num_refs, 3, H, W] - Reference images (optional)
             ref_prototype: [B, C, H, W] - Pre-computed prototype (optional)
             return_features: Whether to return intermediate features
             
         Returns:
             Dictionary containing:
-            - predictions: [B, num_anchors*(5+classes), H, W]
-            - similarity_map: [B, 1, H, W]
-            - attention_weights: [B, num_refs] (if ref_images provided)
+            - predictions: [B, num_anchors*(5+classes), H, W] - Detection outputs
+            - similarity_map: [B, 1, H, W] - Query-reference similarity
+            - attention_weights: [B, num_refs] - Reference attention (if ref_images provided)
         """
         # Encode references if not provided
         attention_weights = None
@@ -254,13 +237,13 @@ class FewShotYOLOv5(nn.Module):
         if isinstance(query_features, (list, tuple)):
             query_features = query_features[-1]
         
-        # Compute similarity
+        # Compute similarity between query and reference
         similarity_map, _ = self.similarity_module(ref_prototype, query_features)
         
         # Concatenate query features and similarity
-        combined = torch.cat([query_features, 
-                             similarity_map.expand(-1, self.feat_dim, -1, -1)], 
-                            dim=1)
+        # Expand similarity to match feature dimension
+        similarity_expanded = similarity_map.expand(-1, self.feat_dim, -1, -1)
+        combined = torch.cat([query_features, similarity_expanded], dim=1)
         
         # Detection head
         predictions = self.detection_head(combined)
@@ -286,7 +269,16 @@ class FewShotYOLOv5(nn.Module):
                        optimizer_state: Optional[Dict] = None,
                        loss: Optional[float] = None,
                        **kwargs) -> None:
-        """Save model checkpoint"""
+        """
+        Save model checkpoint
+        
+        Args:
+            path: Path to save checkpoint
+            epoch: Current epoch number
+            optimizer_state: Optimizer state dict (optional)
+            loss: Current loss value (optional)
+            **kwargs: Additional metadata to save
+        """
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.state_dict(),
@@ -305,7 +297,15 @@ class FewShotYOLOv5(nn.Module):
         print(f"✓ Saved checkpoint: {path}")
     
     def load_checkpoint(self, path: str) -> Dict:
-        """Load model checkpoint"""
+        """
+        Load model checkpoint
+        
+        Args:
+            path: Path to checkpoint file
+            
+        Returns:
+            Dictionary containing checkpoint metadata
+        """
         checkpoint = torch.load(path, map_location='cpu')
         
         # Load model weights
@@ -327,16 +327,26 @@ def build_fewshot_model(yolo_weights: str = 'yolov5m.pt',
     Build Few-Shot YOLOv5 model
     
     Args:
-        yolo_weights: Path to YOLOv5 weights (will auto-download if not exists)
+        yolo_weights: YOLOv5 model name or path to weights
+                     Options: 'yolov5n', 'yolov5s', 'yolov5m', 'yolov5l', 'yolov5x'
         checkpoint: Path to trained checkpoint (optional)
-        freeze_backbone: Whether to freeze backbone
+        freeze_backbone: Whether to freeze YOLOv5 backbone
         num_refs: Number of reference images
-        num_classes: Number of classes
-        device: Device to load model on
+        num_classes: Number of detection classes
+        device: Device to load model on ('cuda' or 'cpu')
+        **kwargs: Additional arguments
         
     Returns:
-        model: FewShotYOLOv5 model
+        model: FewShotYOLOv5 model instance
         metadata: Dictionary with training metadata (if checkpoint loaded)
+        
+    Example:
+        >>> model, _ = build_fewshot_model(
+        ...     yolo_weights='yolov5m.pt',
+        ...     freeze_backbone=True,
+        ...     num_refs=3,
+        ...     device='cuda'
+        ... )
     """
     print("="*70)
     print("Building Few-Shot YOLOv5 Model")
@@ -371,28 +381,87 @@ def build_fewshot_model(yolo_weights: str = 'yolov5m.pt',
     return model, metadata
 
 
-# Test
+# Test module
 if __name__ == '__main__':
+    print("Testing Few-Shot YOLOv5 Model")
+    print("="*70)
+    
     # Test model building
-    print("Testing model building...")
+    print("\n[1/3] Building model...")
+    try:
+        model, _ = build_fewshot_model(
+            yolo_weights='yolov5m.pt',
+            freeze_backbone=True,
+            num_refs=3,
+            device='cpu'  # Use CPU for testing
+        )
+        print("✓ Model built successfully")
+    except Exception as e:
+        print(f"❌ Failed to build model: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
     
-    model, _ = build_fewshot_model(
-        yolo_weights='yolov5m.pt',
-        freeze_backbone=True,
-        num_refs=3,
-        device='cpu'  # Use CPU for testing
-    )
+    # Test forward pass
+    print("\n[2/3] Testing forward pass...")
+    try:
+        # Create dummy inputs
+        batch_size = 2
+        query = torch.randn(batch_size, 3, 640, 640)
+        refs = torch.randn(batch_size, 3, 3, 640, 640)
+        
+        # Forward pass
+        with torch.no_grad():
+            outputs = model(query, refs)
+        
+        print(f"✓ Forward pass successful")
+        print(f"  - Predictions shape: {outputs['predictions'].shape}")
+        print(f"  - Similarity map shape: {outputs['similarity_map'].shape}")
+        print(f"  - Attention weights shape: {outputs['attention_weights'].shape}")
+        F
+    except Exception as e:
+        print(f"❌ Forward pass failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
     
-    print("\nTesting forward pass...")
+    # Test checkpoint save/load
+    print("\n[3/3] Testing checkpoint operations...")
+    try:
+        import tempfile
+        import os
+        
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as tmp:
+            checkpoint_path = tmp.name
+        
+        # Save checkpoint
+        model.save_checkpoint(
+            path=checkpoint_path,
+            epoch=1,
+            loss=0.5
+        )
+        
+        # Load checkpoint
+        model2, metadata = build_fewshot_model(
+            yolo_weights='yolov5m.pt',
+            checkpoint=checkpoint_path,
+            device='cpu'
+        )
+        
+        print(f"✓ Checkpoint operations successful")
+        print(f"  - Loaded epoch: {metadata['epoch']}")
+        print(f"  - Loaded loss: {metadata['loss']}")
+        
+        # Cleanup
+        os.remove(checkpoint_path)
+        
+    except Exception as e:
+        print(f"❌ Checkpoint operations failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
     
-    # Dummy inputs
-    query = torch.randn(2, 3, 640, 640)
-    refs = torch.randn(2, 3, 3, 640, 640)
-    
-    outputs = model(query, refs)
-    
-    print(f"Predictions shape: {outputs['predictions'].shape}")
-    print(f"Similarity map shape: {outputs['similarity_map'].shape}")
-    print(f"Attention weights shape: {outputs['attention_weights'].shape}")
-    
-    print("\n✓ All tests passed!")
+    print("\n" + "="*70)
+    print("✅ All tests passed!")
+    print("="*70)
