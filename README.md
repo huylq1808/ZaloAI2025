@@ -1,4 +1,3 @@
-# README.md
 
 # Team: [HCMUS - FIT]
 # Competition: Aero-Eyes Challenge
